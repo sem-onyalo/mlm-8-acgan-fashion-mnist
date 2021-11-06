@@ -134,22 +134,26 @@ class AuxiliaryClassifierGAN:
         if not os.path.exists(self.evalDirectoryName):
             os.makedirs(self.evalDirectoryName)
 
-        batchesPerEpoch = int(self.data.getDatasetShape() / batchSize)
-        halfBatch = int(batchSize / 2)
+        self.epochs = epochs
+        self.batchSize = batchSize
+        self.evalFreq = evalFreq
+        self.batchesPerEpoch = int(self.data.getDatasetShape() / self.batchSize)
+        self.halfBatch = int(self.batchSize / 2)
+        self.writeTrainingParameters()
 
         self.plotStartingImageSamples()
 
         self.startTime = time.time()
 
-        for i in range(epochs):
-            for j in range(batchesPerEpoch):
-                [xReal, xRealLabel], yReal = self.data.generateRealTrainingSamples(halfBatch)
+        for i in range(self.epochs):
+            for j in range(self.batchesPerEpoch):
+                [xReal, xRealLabel], yReal = self.data.generateRealTrainingSamples(self.halfBatch)
                 _, dRealLossBinary, dRealLossLabels, _, _ = self.discriminator.train_on_batch(xReal, [yReal, xRealLabel])
 
-                [xFake, xFakeLabel], yFake = self.data.generateFakeTrainingSamples(self.generator, self.latentDim, halfBatch)
+                [xFake, xFakeLabel], yFake = self.data.generateFakeTrainingSamples(self.generator, self.latentDim, self.halfBatch)
                 _, dFakeLossBinary, dFakeLossLabels, _, _ = self.discriminator.train_on_batch(xFake, [yFake, xFakeLabel])
 
-                [xGan, xGanLabel], yGan = self.data.generateFakeTrainingGanSamples(self.latentDim, batchSize)
+                [xGan, xGanLabel], yGan = self.data.generateFakeTrainingGanSamples(self.latentDim, self.batchSize)
                 _, gLossBinary, gLossLabels = self.gan.train_on_batch([xGan, xGanLabel], [yGan, xGanLabel])
 
                 self.realBinaryLossHistory.append(dRealLossBinary)
@@ -159,11 +163,11 @@ class AuxiliaryClassifierGAN:
                 self.lossHistory.append(gLossBinary)
 
                 metrics = ('> %d, %d/%d, dRealLossBinary=%.3f, dFakeLossBinary=%.3f, gLossBinary=%.3f' %
-                    (i + 1, j, batchesPerEpoch, dRealLossBinary, dFakeLossBinary, gLossBinary))
+                    (i + 1, j, self.batchesPerEpoch, dRealLossBinary, dFakeLossBinary, gLossBinary))
                 self.metricHistory.append(metrics)
                 print(metrics)
 
-            if (i + 1) % evalFreq == 0:
+            if (i + 1) % self.evalFreq == 0:
                 self.evaluate(i + 1)
 
     def evaluate(self, epoch, samples=150):
@@ -247,6 +251,29 @@ class AuxiliaryClassifierGAN:
         
         print('\nGAN\n')
         self.gan.summary()
+
+    def writeTrainingParameters(self):
+        params = 'Training Parameters\n'
+        params += '--------------------------------------------------\n'
+        params += f'latentDim: {self.latentDim}\n'
+        params += f'convFilters: {self.convFilters}\n'
+        params += f'convTransposeFilters: {self.convTransposeFilters}\n'
+        params += f'generatorInputFilters: {self.generatorInputFilters}\n'
+        params += f'convLayerKernelSize: {self.convLayerKernelSize}\n'
+        params += f'convTransposeLayerKernelSize: {self.convTransposeLayerKernelSize}\n'
+        params += f'generatorOutputLayerKernelSize: {self.generatorOutputLayerKernelSize}\n'
+        params += f'adamLearningRate: {self.adamLearningRate}\n'
+        params += f'adamBeta1: {self.adamBeta1}\n'
+        params += f'kernelInitStdDev: {self.kernelInitStdDev}\n'
+        params += f'leakyReluAlpha: {self.leakyReluAlpha}\n'
+        params += f'dropoutRate: {self.dropoutRate}\n'
+        params += f'epochs: {self.epochs}\n'
+        params += f'batchSize: {self.batchSize}\n'
+        params += f'evalFreq: {self.evalFreq}\n'
+        params += f'batchesPerEpoch: {self.batchesPerEpoch}\n'
+        params += f'halfBatch: {self.halfBatch}\n'
+        with open(os.path.join(self.evalDirectoryName, 'training_parameters.txt'), mode='w') as fd:
+            fd.write(params)
 
 class Inference:
     def __init__(self, data:Data, modelPath:str, latentDim:int) -> None:
