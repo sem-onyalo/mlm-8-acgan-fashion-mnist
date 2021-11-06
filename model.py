@@ -18,7 +18,7 @@ class AuxiliaryClassifierGAN:
 
         self.data = data
         self.latentDim = latentDim
-        self.discriminator = self.createDiscriminator(inputShape)
+        self.discriminator = self.createDiscriminator(inputShape, classes)
         self.generator = self.createGenerator(latentDim, imageDim, labelDim, classes)
         self.gan = self.createGan()
 
@@ -36,24 +36,25 @@ class AuxiliaryClassifierGAN:
         self.generatorOutputLayerKernelSize = (7,7)
 
     def initMetricsVars(self):
-        self.realLossHistory = list()
-        self.realAccHistory = list()
-        self.fakeLossHistory = list()
-        self.fakeAccHistory = list()
+        self.realBinaryLossHistory = list()
+        self.realLabelsLossHistory = list()
+        self.fakeBinaryLossHistory = list()
+        self.fakeLabelsLossHistory = list()
         self.lossHistory = list()
         self.metricHistory = list()
 
-    def createDiscriminator(self, inputShape, batchNorm=True) -> Model:
+    def createDiscriminator(self, inputShape, classes, batchNorm=True) -> Model:
         init = RandomNormal(stddev=self.kernelInitStdDev)
         imageInput = Input(shape=inputShape)
         convLayer = self.buildConvLayers(batchNorm, init, imageInput)
 
         flattenLayer = Flatten()(convLayer)
-        outputLayer = Dense(1, activation='sigmoid')(flattenLayer)
-        labelOutputLayer = Dense(1, activation='softmax')(flattenLayer)
-        model = Model(imageInput, [outputLayer, labelOutputLayer])
+        binaryOutputLayer = Dense(1, activation='sigmoid')(flattenLayer)
+        labelsOutputLayer = Dense(classes, activation='softmax')(flattenLayer)
+        model = Model(imageInput, [binaryOutputLayer, labelsOutputLayer])
 
         opt = Adam(learning_rate=self.adamLearningRate, beta_1=self.adamBeta1)
+        # TODO: check how to get accuracy metrics for multi-output models
         model.compile(loss=['binary_crossentropy', 'sparse_categorical_crossentropy'], optimizer=opt, metrics=['accuracy'])
         return model
 
@@ -89,7 +90,7 @@ class AuxiliaryClassifierGAN:
         model = Model(self.generator.input, ganOutput)
 
         opt = Adam(learning_rate=self.adamLearningRate, beta_1=self.adamBeta1)
-        model.compile(loss='binary_crossentropy', optimizer=opt)
+        model.compile(loss=['binary_crossentropy', 'sparse_categorical_crossentropy'], optimizer=opt)
         return model
 
     def buildConvLayer(self, filters, batchNorm, kernelInit, inLayer):
@@ -142,23 +143,23 @@ class AuxiliaryClassifierGAN:
 
         for i in range(epochs):
             for j in range(batchesPerEpoch):
-                xReal, yReal = self.data.generateRealTrainingSamples(halfBatch)
-                dRealLoss, dRealAcc = self.discriminator.train_on_batch(xReal, yReal)
+                [xReal, xRealLabel], yReal = self.data.generateRealTrainingSamples(halfBatch)
+                _, dRealLossBinary, dRealLossLabels, _, _ = self.discriminator.train_on_batch(xReal, [yReal, xRealLabel])
 
-                xFake, yFake = self.data.generateFakeTrainingSamples(self.generator, self.latentDim, halfBatch)
-                dFakeLoss, dFakeAcc = self.discriminator.train_on_batch(xFake, yFake)
+                [xFake, xFakeLabel], yFake = self.data.generateFakeTrainingSamples(self.generator, self.latentDim, halfBatch)
+                _, dFakeLossBinary, dFakeLossLabels, _, _ = self.discriminator.train_on_batch(xFake, [yFake, xFakeLabel])
 
-                xGan, yGan = self.data.generateFakeTrainingGanSamples(self.latentDim, batchSize)
-                gLoss = self.gan.train_on_batch(xGan, yGan)
+                [xGan, xGanLabel], yGan = self.data.generateFakeTrainingGanSamples(self.latentDim, batchSize)
+                _, gLossBinary, gLossLabels = self.gan.train_on_batch([xGan, xGanLabel], [yGan, xGanLabel])
 
-                self.realLossHistory.append(dRealLoss)
-                self.realAccHistory.append(dRealAcc)
-                self.fakeLossHistory.append(dFakeLoss)
-                self.fakeAccHistory.append(dFakeAcc)
-                self.lossHistory.append(gLoss)
+                self.realBinaryLossHistory.append(dRealLossBinary)
+                self.realLabelsLossHistory.append(dRealLossLabels)
+                self.fakeBinaryLossHistory.append(dFakeLossBinary)
+                self.fakeLabelsLossHistory.append(dFakeLossLabels)
+                self.lossHistory.append(gLossBinary)
 
-                metrics = ('> %d, %d/%d, dRealLoss=%.3f, dFakeLoss=%.3f, gLoss=%.3f' %
-                    (i + 1, j, batchesPerEpoch, dRealLoss, dFakeLoss, gLoss))
+                metrics = ('> %d, %d/%d, dRealLossBinary=%.3f, dFakeLossBinary=%.3f, gLossBinary=%.3f' %
+                    (i + 1, j, batchesPerEpoch, dRealLossBinary, dFakeLossBinary, gLossBinary))
                 self.metricHistory.append(metrics)
                 print(metrics)
 
@@ -166,11 +167,12 @@ class AuxiliaryClassifierGAN:
                 self.evaluate(i + 1)
 
     def evaluate(self, epoch, samples=150):
-        xReal, yReal = self.data.generateRealTrainingSamples(samples)
-        _, dRealAcc = self.discriminator.evaluate(xReal, yReal)
+        [xReal, xRealLabel], yReal = self.data.generateRealTrainingSamples(samples)
+        # TODO: unpack results properly (i.e. figure out which output values are which)
+        _, dRealAcc, _, _, _ = self.discriminator.evaluate(xReal, [yReal, xRealLabel])
 
-        xFake, yFake = self.data.generateFakeTrainingSamples(self.generator, self.latentDim, samples)
-        _, dFakeAcc = self.discriminator.evaluate(xFake, yFake)
+        [xFake, xFakeLabel], yFake = self.data.generateFakeTrainingSamples(self.generator, self.latentDim, samples)
+        _, dFakeAcc, _, _, _ = self.discriminator.evaluate(xFake, [yFake, xFakeLabel])
 
         accuracyMetrics = '> %d, accuracy real: %.0f%%, fake: %.0f%%' % (epoch, dRealAcc * 100, dFakeAcc * 100)
         self.metricHistory.append(accuracyMetrics)
@@ -189,11 +191,11 @@ class AuxiliaryClassifierGAN:
                 fd.write(i + '\n')
             self.metricHistory.clear()
 
-        outputPath = f'{self.evalDirectoryName}/generated_plot_e{epoch}r.png'
-        self.plotImageSamples(xFake, outputPath)
+        outputPath = f'{self.evalDirectoryName}/generated_plot_e{epoch}_random.png'
+        self.plotImageSamples([xFake, xFakeLabel], outputPath)
 
         xFakeOrdered, _ = self.data.generateFakeTrainingSamples(self.generator, self.latentDim, samples, False)
-        outputPath = f'{self.evalDirectoryName}/generated_plot_e{epoch}o.png'
+        outputPath = f'{self.evalDirectoryName}/generated_plot_e{epoch}_ordered.png'
         self.plotImageSamples(xFakeOrdered, outputPath)
 
         self.plotHistory(epoch)
@@ -219,14 +221,14 @@ class AuxiliaryClassifierGAN:
 
     def plotHistory(self, epoch):
         pyplot.subplot(2, 1, 1)
-        pyplot.plot(self.realLossHistory, label='dRealLoss')
-        pyplot.plot(self.fakeLossHistory, label='dFakeLoss')
+        pyplot.plot(self.realBinaryLossHistory, label='dRealLoss')
+        pyplot.plot(self.fakeBinaryLossHistory, label='dFakeLoss')
         pyplot.plot(self.lossHistory, label='gLoss')
         pyplot.legend()
 
         pyplot.subplot(2, 1, 2)
-        pyplot.plot(self.realAccHistory, label='accReal')
-        pyplot.plot(self.fakeAccHistory, label='accFake')
+        pyplot.plot(self.realLabelsLossHistory, label='accReal')
+        pyplot.plot(self.fakeLabelsLossHistory, label='accFake')
         pyplot.legend()
 
         pyplot.savefig('%s/loss_acc_history_e%03d.png' % (self.evalDirectoryName, epoch))
