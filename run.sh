@@ -3,8 +3,8 @@
 set -e # exit when any command fails
 
 wrkdir="."
-venvcmd="env/Scripts/activate"
-runcmd="python main.py --summary"
+venvcmd="env/bin/activate"
+runcmd="python3 main.py --summary"
 
 log()
 {
