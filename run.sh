@@ -23,13 +23,7 @@ log "Switching to working directory '$wrkdir'"
 cd $wrkdir
 
 log "Activating virtual environment '$venvcmd'"
-# source $venvcmd
-
-python -m venv env
-
-source env/bin/activate
-
-pip install -r requirements.txt
+source $venvcmd
 
 log "Running '$runcmd'"
 $runcmd
