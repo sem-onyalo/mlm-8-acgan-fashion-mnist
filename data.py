@@ -1,9 +1,9 @@
-from keras.backend import expand_dims
-from keras.datasets.fashion_mnist import load_data
 from numpy import ones, zeros, asarray
 from numpy.random import randint
 from numpy.random import randn
 from tensorflow import compat, executing_eagerly
+from tensorflow.keras.backend import expand_dims
+from tensorflow.keras.datasets.fashion_mnist import load_data
 from tensorflow.keras.models import Model
 
 class Data():
